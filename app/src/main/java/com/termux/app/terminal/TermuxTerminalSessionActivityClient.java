@@ -18,6 +18,7 @@ import androidx.annotation.Nullable;
 
 import com.termux.R;
 import com.termux.shared.interact.ShareUtils;
+import com.termux.shared.termux.shell.TermuxSessionsOrderManager;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.termux.interact.TextInputDialogUtils;
 import com.termux.app.TermuxActivity;
@@ -41,8 +42,6 @@ import java.util.Properties;
 public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionClientBase {
 
     private final TermuxActivity mActivity;
-
-    private static final int MAX_SESSIONS = 8;
 
     private SoundPool mBellSoundPool;
 
@@ -69,7 +68,11 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         // The service has connected, but data may have changed since we were last in the foreground.
         // Get the session stored in shared preferences stored by {@link #onStop} if its valid,
         // otherwise get the last session currently running.
-        if (mActivity.getTermuxService() != null) {
+        TermuxService service = mActivity.getTermuxService();
+        if (service != null) {
+            // Re-assert the pinned/reordered order (e.g. a session may have been added or removed
+            // while the activity was detached) before restoring the current session and selection.
+            service.applySessionsListOrder();
             setCurrentSession(getCurrentStoredSessionOrLast());
             termuxSessionListNotifyUpdated();
         }
@@ -340,6 +343,28 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             setCurrentSession(termuxSession.getTerminalSession());
     }
 
+    /** Toggle whether a session is pinned to the top of the sessions list. */
+    public void togglePinSession(TerminalSession session) {
+        TermuxService service = mActivity.getTermuxService();
+        if (service == null || session == null) return;
+        if (service.toggleSessionPinned(session)) {
+            termuxSessionListNotifyUpdated();
+            // The current session's row index may have shifted, so re-select and scroll to it.
+            checkAndScrollToSession(mActivity.getCurrentSession());
+        }
+    }
+
+    /** Move a session one step up or down within its pin-group in the sessions list. */
+    public void moveSession(TerminalSession session, boolean up) {
+        TermuxService service = mActivity.getTermuxService();
+        if (service == null || session == null) return;
+        if (service.moveSession(session, up)) {
+            termuxSessionListNotifyUpdated();
+            // The current session's row index may have shifted, so re-select and scroll to it.
+            checkAndScrollToSession(mActivity.getCurrentSession());
+        }
+    }
+
     @SuppressLint("InflateParams")
     public void renameSession(final TerminalSession sessionToRename) {
         if (sessionToRename == null) return;
@@ -365,7 +390,7 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         TermuxService service = mActivity.getTermuxService();
         if (service == null) return;
 
-        if (service.getTermuxSessionsSize() >= MAX_SESSIONS) {
+        if (TermuxSessionsOrderManager.isAtCapacity(service.getTermuxSessionsSize())) {
             new AlertDialog.Builder(mActivity).setTitle(R.string.title_max_terminals_reached).setMessage(R.string.msg_max_terminals_reached)
                 .setPositiveButton(android.R.string.ok, null).show();
         } else {

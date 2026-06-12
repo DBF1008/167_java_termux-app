@@ -52,6 +52,14 @@
     <string name="title_create_named_session">New named session</string>
     <string name="action_create_named_session_confirm">Create</string>
 
+    <string name="title_session_actions">Session actions</string>
+    <string name="action_rename_session">Rename</string>
+    <string name="action_pin_session">Pin to top</string>
+    <string name="action_unpin_session">Unpin</string>
+    <string name="action_move_session_up">Move up</string>
+    <string name="action_move_session_down">Move down</string>
+    <string name="session_pinned_indicator">"📌 "</string>
+
     <string name="action_toggle_soft_keyboard">Keyboard</string>
 
     <string name="msg_enabling_terminal_toolbar">Enabling Terminal Toolbar</string>

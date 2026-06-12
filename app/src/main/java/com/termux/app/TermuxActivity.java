@@ -391,6 +391,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         setTermuxSessionsListView();
 
+        // Ensure the sessions list reflects the saved pinned/reordered order as soon as we (re)bind,
+        // so an activity rebuild or service reconnect restores the stable order and selection.
+        mTermuxService.applySessionsListOrder();
+
         final Intent intent = getIntent();
         setIntent(null);
 

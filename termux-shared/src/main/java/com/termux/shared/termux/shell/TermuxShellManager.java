@@ -31,6 +31,13 @@ public class TermuxShellManager {
     public final List<TermuxSession> mTermuxSessions = new ArrayList<>();
 
     /**
+     * Tracks the user-defined pinned/reordered display order of {@link #mTermuxSessions}. It shares
+     * the lifetime of this app-scoped manager (and therefore of the sessions themselves), so the
+     * order survives activity rebuilds and service reconnects.
+     */
+    public final TermuxSessionsOrderManager mSessionsOrderManager = new TermuxSessionsOrderManager();
+
+    /**
      * The background TermuxTasks which this service manages.
      */
     public final List<AppShell> mTermuxTasks = new ArrayList<>();

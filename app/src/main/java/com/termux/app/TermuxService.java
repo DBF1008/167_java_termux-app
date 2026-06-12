@@ -35,6 +35,7 @@ import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_SERVICE;
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences;
+import com.termux.shared.termux.shell.TermuxSessionsOrderManager;
 import com.termux.shared.termux.shell.TermuxShellManager;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.termux.terminal.TermuxTerminalSessionClientBase;
@@ -50,6 +51,7 @@ import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -607,6 +609,10 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
         mShellManager.mTermuxSessions.add(newTermuxSession);
 
+        // Keep the sessions list in the user-defined pinned/reordered order so the new session
+        // appears in its stable place and the displayed [N] numbering stays consistent.
+        applySessionsListOrder();
+
         // Remove the execution command from the pending plugin execution commands list since it has
         // now been processed
         if (executionCommand.isPluginExecutionCommand)
@@ -648,6 +654,10 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
                 TermuxPluginUtils.processPluginExecutionCommandResult(this, LOG_TAG, executionCommand);
 
             mShellManager.mTermuxSessions.remove(termuxSession);
+
+            // Drop the removed session's pin/order state and re-apply ordering to the remainder.
+            mShellManager.mSessionsOrderManager.forget(termuxSession.getTerminalSession().mHandle);
+            applySessionsListOrder();
 
             // Notify {@link TermuxSessionsListViewController} that sessions list has been updated if
             // activity in is foreground
@@ -880,6 +890,53 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
     public synchronized List<TermuxSession> getTermuxSessions() {
         return mShellManager.mTermuxSessions;
+    }
+
+    /** The manager that tracks the user-defined pinned/reordered session display order. */
+    public TermuxSessionsOrderManager getSessionsOrderManager() {
+        return mShellManager.mSessionsOrderManager;
+    }
+
+    /**
+     * Reorder {@link TermuxShellManager#mTermuxSessions} in place to match the user-defined pinned and
+     * reordered display order. Done in place so the list reference observed by
+     * {@link com.termux.app.terminal.TermuxSessionsListViewController} stays valid; callers should
+     * follow this with a {@code notifyDataSetChanged()} on the UI thread.
+     */
+    public synchronized void applySessionsListOrder() {
+        final List<TermuxSession> sessions = mShellManager.mTermuxSessions;
+        if (sessions.size() < 2) return;
+
+        final List<String> desiredOrder = mShellManager.mSessionsOrderManager.computeOrder(currentSessionHandles());
+        Collections.sort(sessions, (s1, s2) -> Integer.compare(
+            desiredOrder.indexOf(s1.getTerminalSession().mHandle),
+            desiredOrder.indexOf(s2.getTerminalSession().mHandle)));
+    }
+
+    /** Toggle the pinned state of a session and re-apply ordering. Returns true if it changed. */
+    public synchronized boolean toggleSessionPinned(TerminalSession terminalSession) {
+        if (terminalSession == null) return false;
+        boolean changed = mShellManager.mSessionsOrderManager.togglePinned(terminalSession.mHandle);
+        if (changed) applySessionsListOrder();
+        return changed;
+    }
+
+    /** Move a session one step up or down within its pin-group. Returns true if it moved. */
+    public synchronized boolean moveSession(TerminalSession terminalSession, boolean up) {
+        if (terminalSession == null) return false;
+        TermuxSessionsOrderManager orderManager = mShellManager.mSessionsOrderManager;
+        List<String> handles = currentSessionHandles();
+        boolean moved = up ? orderManager.moveUp(terminalSession.mHandle, handles)
+            : orderManager.moveDown(terminalSession.mHandle, handles);
+        if (moved) applySessionsListOrder();
+        return moved;
+    }
+
+    private List<String> currentSessionHandles() {
+        List<String> handles = new ArrayList<>(mShellManager.mTermuxSessions.size());
+        for (int i = 0; i < mShellManager.mTermuxSessions.size(); i++)
+            handles.add(mShellManager.mTermuxSessions.get(i).getTerminalSession().mHandle);
+        return handles;
     }
 
     @Nullable

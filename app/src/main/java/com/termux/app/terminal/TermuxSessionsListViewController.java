@@ -1,6 +1,7 @@
 package com.termux.app.terminal;
 
 import android.annotation.SuppressLint;
+import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
@@ -20,6 +21,7 @@ import androidx.core.content.ContextCompat;
 
 import com.termux.R;
 import com.termux.app.TermuxActivity;
+import com.termux.app.TermuxService;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.theme.NightMode;
 import com.termux.shared.theme.ThemeUtils;
@@ -68,7 +70,12 @@ public class TermuxSessionsListViewController extends ArrayAdapter<TermuxSession
         String name = sessionAtRow.mSessionName;
         String sessionTitle = sessionAtRow.getTitle();
 
-        String numberPart = "[" + (position + 1) + "] ";
+        String pinnedPart = "";
+        TermuxService service = mActivity.getTermuxService();
+        if (service != null && service.getSessionsOrderManager().isPinned(sessionAtRow.mHandle))
+            pinnedPart = mActivity.getString(R.string.session_pinned_indicator);
+
+        String numberPart = pinnedPart + "[" + (position + 1) + "] ";
         String sessionNamePart = (TextUtils.isEmpty(name) ? "" : name);
         String sessionTitlePart = (TextUtils.isEmpty(sessionTitle) ? "" : ((sessionNamePart.isEmpty() ? "" : "\n") + sessionTitle));
 
@@ -102,7 +109,43 @@ public class TermuxSessionsListViewController extends ArrayAdapter<TermuxSession
     @Override
     public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
         final TermuxSession selectedSession = getItem(position);
-        mActivity.getTermuxTerminalSessionClient().renameSession(selectedSession.getTerminalSession());
+        if (selectedSession == null) return true;
+
+        final TerminalSession terminalSession = selectedSession.getTerminalSession();
+
+        boolean pinned = false;
+        TermuxService service = mActivity.getTermuxService();
+        if (service != null)
+            pinned = service.getSessionsOrderManager().isPinned(terminalSession.mHandle);
+
+        CharSequence[] actions = {
+            mActivity.getString(R.string.action_rename_session),
+            mActivity.getString(pinned ? R.string.action_unpin_session : R.string.action_pin_session),
+            mActivity.getString(R.string.action_move_session_up),
+            mActivity.getString(R.string.action_move_session_down),
+        };
+
+        new AlertDialog.Builder(mActivity)
+            .setTitle(R.string.title_session_actions)
+            .setItems(actions, (dialog, which) -> {
+                switch (which) {
+                    case 0:
+                        mActivity.getTermuxTerminalSessionClient().renameSession(terminalSession);
+                        break;
+                    case 1:
+                        mActivity.getTermuxTerminalSessionClient().togglePinSession(terminalSession);
+                        break;
+                    case 2:
+                        mActivity.getTermuxTerminalSessionClient().moveSession(terminalSession, true);
+                        break;
+                    case 3:
+                        mActivity.getTermuxTerminalSessionClient().moveSession(terminalSession, false);
+                        break;
+                    default:
+                        break;
+                }
+            })
+            .show();
         return true;
     }
 

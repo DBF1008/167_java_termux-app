@@ -33,4 +33,36 @@ public class FileReceiverActivityTest {
         }
     }
 
+    @Test
+    public void testIsSharedTextAnUrl_validMagnetLink() {
+        Assert.assertTrue(FileReceiverActivity.isSharedTextAnUrl(
+            "magnet:?xt=urn:btih:d540fc48eb12f2833163eed6421d449dd8f1ce1f"));
+    }
+
+    @Test
+    public void testIsSharedTextAnUrl_plainTextReturnsFalse() {
+        Assert.assertFalse(FileReceiverActivity.isSharedTextAnUrl("Hello world"));
+    }
+
+    @Test
+    public void testIsSharedTextAnUrl_partialUrlReturnsFalse() {
+        Assert.assertFalse(FileReceiverActivity.isSharedTextAnUrl("visit example.com today"));
+    }
+
+    @Test
+    public void testIsSharedTextAnUrl_magnetLinkWithParams() {
+        Assert.assertTrue(FileReceiverActivity.isSharedTextAnUrl(
+            "magnet:?xt=urn:btih:abc123&dn=test&tr=udp://tracker.example.com:80"));
+    }
+
+    @Test
+    public void testIsSharedTextAnUrl_emptyString() {
+        Assert.assertFalse(FileReceiverActivity.isSharedTextAnUrl(""));
+    }
+
+    @Test
+    public void testIsSharedTextAnUrl_nullString() {
+        Assert.assertFalse(FileReceiverActivity.isSharedTextAnUrl(null));
+    }
+
 }

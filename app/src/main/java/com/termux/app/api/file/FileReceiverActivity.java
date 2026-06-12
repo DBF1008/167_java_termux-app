@@ -22,10 +22,10 @@ import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_SERVICE;
 import com.termux.app.TermuxService;
+import com.termux.app.api.file.SavePolicyUtils;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.settings.properties.TermuxAppSharedProperties;
 import com.termux.shared.termux.settings.properties.TermuxPropertyConstants;
-
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -74,12 +74,15 @@ public class FileReceiverActivity extends AppCompatActivity {
 
         final String sharedTitle = IntentUtils.getStringExtraIfSet(intent, Intent.EXTRA_TITLE, null);
 
+        // Read save policy once at entry
+        String savePolicy = TermuxAppSharedProperties.getProperties().getFileSavePolicy();
+
         if (Intent.ACTION_SEND.equals(action) && type != null) {
             final String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
             final Uri sharedUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
 
             if (sharedUri != null) {
-                handleContentUri(sharedUri, sharedTitle);
+                handleContentUri(sharedUri, sharedTitle, savePolicy);
             } else if (sharedText != null) {
                 if (isSharedTextAnUrl(sharedText)) {
                     handleUrlAndFinish(sharedText);
@@ -87,7 +90,9 @@ public class FileReceiverActivity extends AppCompatActivity {
                     String subject = IntentUtils.getStringExtraIfSet(intent, Intent.EXTRA_SUBJECT, null);
                     if (subject == null) subject = sharedTitle;
                     if (subject != null) subject += ".txt";
-                    promptNameAndSave(new ByteArrayInputStream(sharedText.getBytes(StandardCharsets.UTF_8)), subject);
+                    handleSaveWithPolicy(
+                        new ByteArrayInputStream(sharedText.getBytes(StandardCharsets.UTF_8)),
+                        subject, savePolicy);
                 }
             } else {
                 showErrorDialogAndQuit("Send action without content - nothing to save.");
@@ -101,7 +106,7 @@ public class FileReceiverActivity extends AppCompatActivity {
             }
 
             if (UriScheme.SCHEME_CONTENT.equals(scheme)) {
-                handleContentUri(dataUri, sharedTitle);
+                handleContentUri(dataUri, sharedTitle, savePolicy);
             } else if (UriScheme.SCHEME_FILE.equals(scheme)) {
                 Logger.logVerbose(LOG_TAG, "uri: \"" + dataUri + "\", path: \"" + dataUri.getPath() + "\", fragment: \"" + dataUri.getFragment() + "\"");
 
@@ -115,7 +120,7 @@ public class FileReceiverActivity extends AppCompatActivity {
                 File file = new File(path);
                 try {
                     FileInputStream in = new FileInputStream(file);
-                    promptNameAndSave(in, file.getName());
+                    handleSaveWithPolicy(in, file.getName(), savePolicy);
                 } catch (FileNotFoundException e) {
                     showErrorDialogAndQuit("Cannot open file: " + e.getMessage() + ".");
                 }
@@ -134,7 +139,7 @@ public class FileReceiverActivity extends AppCompatActivity {
             dialog -> finish());
     }
 
-    void handleContentUri(@NonNull final Uri uri, String subjectFromIntent) {
+    void handleContentUri(@NonNull final Uri uri, String subjectFromIntent, String savePolicy) {
         try {
             Logger.logVerbose(LOG_TAG, "uri: \"" + uri + "\", path: \"" + uri.getPath() + "\", fragment: \"" + uri.getFragment() + "\"");
 
@@ -152,11 +157,100 @@ public class FileReceiverActivity extends AppCompatActivity {
             if (attachmentFileName == null) attachmentFileName = UriUtils.getUriFileBasename(uri, true);
 
             InputStream in = getContentResolver().openInputStream(uri);
-            promptNameAndSave(in, attachmentFileName);
+            handleSaveWithPolicy(in, attachmentFileName, savePolicy);
         } catch (Exception e) {
             showErrorDialogAndQuit("Unable to handle shared content:\n\n" + e.getMessage());
             Logger.logStackTraceWithMessage(LOG_TAG, "handleContentUri(uri=" + uri + ") failed", e);
         }
+    }
+
+    /**
+     * Routes save flow based on the configured save policy.
+     */
+    void handleSaveWithPolicy(InputStream in, String attachmentFileName, String savePolicy) {
+        if (SavePolicyUtils.POLICY_AUTO_RENAME.equals(savePolicy)) {
+            autoRenameAndSave(in, attachmentFileName);
+        } else if (SavePolicyUtils.POLICY_OVERWRITE.equals(savePolicy)) {
+            promptNameAndSave(in, attachmentFileName);
+        } else {
+            // POLICY_PROMPT (default)
+            promptNameAndSaveWithProtection(in, attachmentFileName);
+        }
+    }
+
+    /**
+     * Auto-saves with a safe (non-conflicting) filename, then opens the downloads directory.
+     * No user interaction required.
+     */
+    void autoRenameAndSave(InputStream in, String attachmentFileName) {
+        File receiveDir = new File(TERMUX_RECEIVEDIR);
+        if (!receiveDir.isDirectory() && !receiveDir.mkdirs()) {
+            showErrorDialogAndQuit("Cannot create directory: " + receiveDir.getAbsolutePath());
+            return;
+        }
+
+        if (DataUtils.isNullOrEmpty(attachmentFileName)) {
+            showErrorDialogAndQuit("File name cannot be null or empty");
+            return;
+        }
+
+        String safeName = SavePolicyUtils.getSafeFileName(receiveDir, attachmentFileName);
+        File outFile = saveStreamWithName(in, safeName);
+        if (outFile == null) return;
+
+        // Open the downloads directory in terminal
+        Intent executeIntent = new Intent(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
+        executeIntent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, TERMUX_RECEIVEDIR);
+        executeIntent.setClass(FileReceiverActivity.this, TermuxService.class);
+        startService(executeIntent);
+        finish();
+    }
+
+    /**
+     * Shows the name dialog like {@link #promptNameAndSave(InputStream, String)} but applies
+     * safe naming inside both button callbacks to prevent overwrites.
+     */
+    void promptNameAndSaveWithProtection(final InputStream in, final String attachmentFileName) {
+        TextInputDialogUtils.textInput(this, R.string.title_file_received, attachmentFileName,
+            R.string.action_file_received_edit, text -> {
+                File receiveDir = new File(TERMUX_RECEIVEDIR);
+                String safeName = SavePolicyUtils.getSafeFileName(receiveDir, text);
+                File outFile = saveStreamWithName(in, safeName);
+                if (outFile == null) return;
+
+                final File editorProgramFile = new File(EDITOR_PROGRAM);
+                if (!editorProgramFile.isFile()) {
+                    showErrorDialogAndQuit("The following file does not exist:\n$HOME/bin/termux-file-editor\n\n"
+                        + "Create this file as a script or a symlink - it will be called with the received file as only argument.");
+                    return;
+                }
+
+                // Do this for the user if necessary:
+                //noinspection ResultOfMethodCallIgnored
+                editorProgramFile.setExecutable(true);
+
+                final Uri scriptUri = UriUtils.getFileUri(EDITOR_PROGRAM);
+
+                Intent executeIntent = new Intent(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE, scriptUri);
+                executeIntent.setClass(FileReceiverActivity.this, TermuxService.class);
+                executeIntent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[]{outFile.getAbsolutePath()});
+                startService(executeIntent);
+                finish();
+            },
+            R.string.action_file_received_open_directory, text -> {
+                File receiveDir = new File(TERMUX_RECEIVEDIR);
+                String safeName = SavePolicyUtils.getSafeFileName(receiveDir, text);
+                if (saveStreamWithName(in, safeName) == null) return;
+
+                Intent executeIntent = new Intent(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
+                executeIntent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, TERMUX_RECEIVEDIR);
+                executeIntent.setClass(FileReceiverActivity.this, TermuxService.class);
+                startService(executeIntent);
+                finish();
+            },
+            android.R.string.cancel, text -> finish(), dialog -> {
+                if (mFinishOnDismissNameDialog) finish();
+            });
     }
 
     void promptNameAndSave(final InputStream in, final String attachmentFileName) {

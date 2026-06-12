@@ -300,6 +300,8 @@ public abstract class TermuxSharedProperties {
                 return (String) getSoftKeyboardToggleBehaviourInternalPropertyValueFromValue(value);
             case TermuxPropertyConstants.KEY_VOLUME_KEYS_BEHAVIOUR:
                 return (String) getVolumeKeysBehaviourInternalPropertyValueFromValue(value);
+            case TermuxPropertyConstants.KEY_FILE_SAVE_POLICY:
+                return (String) getFileSavePolicyInternalPropertyValueFromValue(value);
 
             default:
                 // default false boolean behaviour
@@ -570,6 +572,17 @@ public abstract class TermuxSharedProperties {
         return (String) SharedProperties.getDefaultIfNotInMap(TermuxPropertyConstants.KEY_VOLUME_KEYS_BEHAVIOUR, TermuxPropertyConstants.MAP_VOLUME_KEYS_BEHAVIOUR, SharedProperties.toLowerCase(value), TermuxPropertyConstants.DEFAULT_IVALUE_VOLUME_KEYS_BEHAVIOUR, true, LOG_TAG);
     }
 
+    /**
+     * Returns the value itself if it is not {@code null} and valid,
+     * otherwise returns {@link TermuxPropertyConstants#DEFAULT_VALUE_FILE_SAVE_POLICY}.
+     *
+     * @param value {@link String} value to convert.
+     * @return Returns the internal value for value.
+     */
+    public static String getFileSavePolicyInternalPropertyValueFromValue(String value) {
+        return (String) SharedProperties.getDefaultIfNotInMap(TermuxPropertyConstants.KEY_FILE_SAVE_POLICY, TermuxPropertyConstants.MAP_FILE_SAVE_POLICY, SharedProperties.toLowerCase(value), TermuxPropertyConstants.DEFAULT_VALUE_FILE_SAVE_POLICY, true, LOG_TAG);
+    }
+
 
 
 
@@ -682,6 +695,10 @@ public abstract class TermuxSharedProperties {
 
     public boolean areVirtualVolumeKeysDisabled() {
         return (boolean) TermuxPropertyConstants.IVALUE_VOLUME_KEY_BEHAVIOUR_VOLUME.equals(getInternalPropertyValue(TermuxPropertyConstants.KEY_VOLUME_KEYS_BEHAVIOUR, true));
+    }
+
+    public String getFileSavePolicy() {
+        return (String) getInternalPropertyValue(TermuxPropertyConstants.KEY_FILE_SAVE_POLICY, true);
     }
 
 

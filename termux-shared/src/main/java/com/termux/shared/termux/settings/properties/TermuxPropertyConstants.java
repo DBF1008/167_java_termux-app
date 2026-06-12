@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Set;
 
 /*
- * Version: v0.18.0
+ * Version: v0.19.0
  * SPDX-License-Identifier: MIT
  *
  * Changelog
@@ -80,6 +80,9 @@ import java.util.Set;
  *
  * - 0.18.0 (2022-06-13)
  *      - Add `KEY_DISABLE_FILE_SHARE_RECEIVER` and `KEY_DISABLE_FILE_VIEW_RECEIVER`.
+ *
+ * - 0.19.0 (2026-06-12)
+ *      - Add `KEY_FILE_SAVE_POLICY`.
  */
 
 /**
@@ -384,6 +387,23 @@ public final class TermuxPropertyConstants {
 
 
 
+    /** Defines the key for the file save policy used by FileReceiverActivity. */
+    public static final String KEY_FILE_SAVE_POLICY = "file-save-policy"; // Default: "file-save-policy"
+
+    public static final String VALUE_FILE_SAVE_POLICY_PROMPT = "prompt";
+    public static final String VALUE_FILE_SAVE_POLICY_AUTO_RENAME = "auto-rename";
+    public static final String VALUE_FILE_SAVE_POLICY_OVERWRITE = "overwrite";
+    public static final String DEFAULT_VALUE_FILE_SAVE_POLICY = VALUE_FILE_SAVE_POLICY_PROMPT;
+
+    /** Defines the bidirectional map for file save policy values and their internal values */
+    public static final ImmutableBiMap<String, String> MAP_FILE_SAVE_POLICY =
+        new ImmutableBiMap.Builder<String, String>()
+            .put(VALUE_FILE_SAVE_POLICY_PROMPT, VALUE_FILE_SAVE_POLICY_PROMPT)
+            .put(VALUE_FILE_SAVE_POLICY_AUTO_RENAME, VALUE_FILE_SAVE_POLICY_AUTO_RENAME)
+            .put(VALUE_FILE_SAVE_POLICY_OVERWRITE, VALUE_FILE_SAVE_POLICY_OVERWRITE)
+            .build();
+
+
 
 
     /** Defines the set for keys loaded by termux
@@ -430,7 +450,8 @@ public final class TermuxPropertyConstants {
         KEY_EXTRA_KEYS_STYLE,
         KEY_NIGHT_MODE,
         KEY_SOFT_KEYBOARD_TOGGLE_BEHAVIOUR,
-        KEY_VOLUME_KEYS_BEHAVIOUR
+        KEY_VOLUME_KEYS_BEHAVIOUR,
+        KEY_FILE_SAVE_POLICY
     ));
 
     /** Defines the set for keys loaded by termux that have default boolean behaviour with false as default.

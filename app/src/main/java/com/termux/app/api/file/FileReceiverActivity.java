@@ -256,32 +256,50 @@ public class FileReceiverActivity extends AppCompatActivity {
      * {@link TermuxPropertyConstants#KEY_DISABLE_FILE_VIEW_RECEIVER} value.
      */
     public static void updateFileReceiverActivityComponentsState(@NonNull Context context) {
+        TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
+        final boolean fileShareReceiverDisabled = properties.isFileShareReceiverDisabled();
+        final boolean fileViewReceiverDisabled = properties.isFileViewReceiverDisabled();
         new Thread() {
             @Override
             public void run() {
-                TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
-
-                String errmsg;
-                boolean state;
-
-                state = !properties.isFileShareReceiverDisabled();
-                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
-                errmsg = PackageUtils.setComponentState(context,TermuxConstants.TERMUX_PACKAGE_NAME,
-                    TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME,
-                    state, null, false, false);
-                if (errmsg != null)
-                    Logger.logError(LOG_TAG, errmsg);
-
-                state = !properties.isFileViewReceiverDisabled();
-                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
-                errmsg = PackageUtils.setComponentState(context,TermuxConstants.TERMUX_PACKAGE_NAME,
-                    TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME,
-                    state, null, false, false);
-                if (errmsg != null)
-                    Logger.logError(LOG_TAG, errmsg);
-
+                setFileReceiverComponentsState(context, fileShareReceiverDisabled, fileViewReceiverDisabled);
             }
         }.start();
+    }
+
+    /**
+     * Set {@link TERMUX_APP#FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME} and
+     * {@link TERMUX_APP#FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME} component states synchronously on the
+     * calling thread. {@link #updateFileReceiverActivityComponentsState(Context)} is the production
+     * entry point that reads the current property values and runs this off the main thread. The
+     * disabled flags are passed in so the component-toggling logic can be exercised without the
+     * {@link TermuxAppSharedProperties} singleton.
+     *
+     * @param context The {@link Context} for {@link PackageUtils#setComponentState}.
+     * @param fileShareReceiverDisabled Whether the file share receiver component should be disabled.
+     * @param fileViewReceiverDisabled Whether the file view receiver component should be disabled.
+     */
+    static void setFileReceiverComponentsState(@NonNull Context context,
+                                               boolean fileShareReceiverDisabled,
+                                               boolean fileViewReceiverDisabled) {
+        String errmsg;
+        boolean state;
+
+        state = !fileShareReceiverDisabled;
+        Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
+        errmsg = PackageUtils.setComponentState(context, TermuxConstants.TERMUX_PACKAGE_NAME,
+            TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME,
+            state, null, false, false);
+        if (errmsg != null)
+            Logger.logError(LOG_TAG, errmsg);
+
+        state = !fileViewReceiverDisabled;
+        Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
+        errmsg = PackageUtils.setComponentState(context, TermuxConstants.TERMUX_PACKAGE_NAME,
+            TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME,
+            state, null, false, false);
+        if (errmsg != null)
+            Logger.logError(LOG_TAG, errmsg);
     }
 
 }

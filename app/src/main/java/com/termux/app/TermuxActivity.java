@@ -31,6 +31,7 @@ import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
+import com.termux.app.utils.TermuxAppReloadUtils;
 import com.termux.shared.activities.ReportActivity;
 import com.termux.shared.activity.ActivityUtils;
 import com.termux.shared.activity.media.AppCompatActivityUtils;
@@ -981,7 +982,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         setMargins();
         setTerminalToolbarHeight();
 
-        FileReceiverActivity.updateFileReceiverActivityComponentsState(this);
+        // Hot-reload the process-global settings: reconcile the termux-am socket server (and the
+        // value exported to new sessions/tasks) and the file share/view receiver components.
+        // Properties were already reloaded above by reloadProperties(), so don't read the file twice.
+        TermuxAppReloadUtils.reloadTermuxAppSettings(this, false);
 
         if (mTermuxTerminalSessionActivityClient != null)
             mTermuxTerminalSessionActivityClient.onReloadActivityStyling();

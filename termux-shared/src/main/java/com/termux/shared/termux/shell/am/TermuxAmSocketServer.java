@@ -46,8 +46,10 @@ import com.termux.shared.termux.shell.command.environment.TermuxAppShellEnvironm
  *
  * The server is started by termux-app Application class but is not started if
  * {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER} is `false` which can be done by
- * adding the prop with value "false" to the "~/.termux/termux.properties" file. Changes
- * require termux-app to be force stopped and restarted.
+ * adding the prop with value "false" to the "~/.termux/termux.properties" file. Changes can be
+ * applied at runtime by reloading settings (for example via `termux-reload-settings`), which calls
+ * {@link #updateState(Context)} to start or stop the server and update the value exported to new
+ * shell sessions and tasks. Already running shells/tasks keep the value they were started with.
  *
  * The current state of the server can be checked with the
  * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} env variable, which is exported
@@ -89,11 +91,10 @@ public class TermuxAmSocketServer {
             Logger.logDebug(LOG_TAG, "Not starting " + TITLE + " socket server since its not enabled");
         }
 
-        // Once termux-app has started, the server state must not be changed since the variable is
-        // exported in shell sessions and tasks and if state is changed, then env of older shells will
-        // retain invalid value. User should force stop the app to update state after changing prop.
-        TERMUX_APP_AM_SOCKET_SERVER_ENABLED = enabled;
-        TermuxAppShellEnvironment.updateTermuxAppAMSocketServerEnabled(context);
+        // Sync the exported state to the actual server state. After app start this can be updated
+        // again via a settings hot-reload (updateState); already running shells/tasks keep the env
+        // snapshot they captured, while new shells/tasks read the updated value.
+        setTermuxAppAMSocketServerEnabled(context, enabled);
     }
 
     /**
@@ -122,22 +123,77 @@ public class TermuxAmSocketServer {
     }
     
     /**
-     * Update the state of the {@link AmSocketServer} {@link LocalServerSocket} depending on current
-     * value of {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER}.
+     * Update the state of the {@link AmSocketServer} {@link LocalServerSocket} depending on the
+     * current value of {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER} read from the
+     * {@link TermuxAppSharedProperties} in-memory cache (call
+     * {@link TermuxAppSharedProperties#loadTermuxPropertiesFromDisk()} first to pick up file changes).
+     *
+     * This is the safe hot-reload primitive: it starts or stops the server to match the property and
+     * then syncs the exported {@link #TERMUX_APP_AM_SOCKET_SERVER_ENABLED} value and the
+     * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} env so that new
+     * shell sessions and tasks read the updated value. Already running shells/tasks keep the env
+     * snapshot they captured when they were created.
      */
     public static synchronized void updateState(@NonNull Context context) {
-        TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
-        if (properties.shouldRunTermuxAmSocketServer()) {
-            if (termuxAmSocketServer == null) {
+        boolean shouldRun = TermuxAppSharedProperties.getProperties().shouldRunTermuxAmSocketServer();
+        boolean isCurrentlyRunning = termuxAmSocketServer != null;
+
+        switch (getSocketServerActionForState(shouldRun, isCurrentlyRunning)) {
+            case START:
                 Logger.logDebug(LOG_TAG, "updateState: Starting " + TITLE + " socket server");
                 start(context);
-            }
-        } else {
-            if (termuxAmSocketServer != null) {
+                break;
+            case STOP:
                 Logger.logDebug(LOG_TAG, "updateState: Disabling " + TITLE + " socket server");
                 stop();
-            }
+                break;
+            case NONE:
+                break;
         }
+
+        // Sync exported state to the actual server state. start() may fail (e.g. socket lib load or
+        // socket creation error) leaving the server stopped, so derive the value from the real state.
+        setTermuxAppAMSocketServerEnabled(context,
+            termuxAmSocketServer != null && termuxAmSocketServer.isRunning());
+    }
+
+    /** The action required to reconcile the {@link AmSocketServer} with the desired enabled state. */
+    public enum SocketServerAction {
+        /** Server should be running but isn't, so it must be started. */
+        START,
+        /** Server is running but shouldn't be, so it must be stopped. */
+        STOP,
+        /** Server is already in the desired state, so nothing needs to be done. */
+        NONE
+    }
+
+    /**
+     * Get the {@link SocketServerAction} required to reconcile the server with the desired state.
+     * This is a pure function with no side effects so the hot-reload policy can be unit tested
+     * without touching the native socket layer.
+     *
+     * @param shouldRun Whether the server should be running as per the user property.
+     * @param isCurrentlyRunning Whether a server instance currently exists.
+     * @return Returns the {@link SocketServerAction} to apply.
+     */
+    public static SocketServerAction getSocketServerActionForState(boolean shouldRun, boolean isCurrentlyRunning) {
+        if (shouldRun && !isCurrentlyRunning) return SocketServerAction.START;
+        if (!shouldRun && isCurrentlyRunning) return SocketServerAction.STOP;
+        return SocketServerAction.NONE;
+    }
+
+    /**
+     * Set the exported {@link #TERMUX_APP_AM_SOCKET_SERVER_ENABLED} value and sync the
+     * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} env variable read by
+     * new shell sessions and tasks. Already running shells/tasks keep their env snapshot since a
+     * running process's environment cannot be mutated.
+     *
+     * @param context The {@link Context} for {@link TermuxAppShellEnvironment}.
+     * @param enabled Whether the server is enabled and running.
+     */
+    public static synchronized void setTermuxAppAMSocketServerEnabled(@NonNull Context context, boolean enabled) {
+        TERMUX_APP_AM_SOCKET_SERVER_ENABLED = enabled;
+        TermuxAppShellEnvironment.updateTermuxAppAMSocketServerEnabled(context);
     }
     
     /**

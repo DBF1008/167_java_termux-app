@@ -105,7 +105,7 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
     }
 
     /**
-     * Should be called when mActivity.reloadActivityStyling() is called
+     * Should be called when the activity configuration is reloaded (TermuxActivityConfigurer.reloadConfiguration()).
      */
     public void onReloadActivityStyling() {
         // Set terminal fonts and colors

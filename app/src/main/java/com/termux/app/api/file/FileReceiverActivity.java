@@ -24,6 +24,7 @@ import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_SERVICE;
 import com.termux.app.TermuxService;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.settings.properties.TermuxAppSharedProperties;
+import com.termux.shared.termux.settings.properties.TermuxConfigurationState;
 import com.termux.shared.termux.settings.properties.TermuxPropertyConstants;
 
 import java.io.ByteArrayInputStream;
@@ -259,24 +260,22 @@ public class FileReceiverActivity extends AppCompatActivity {
         new Thread() {
             @Override
             public void run() {
-                TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
+                // Resolve the desired component states from properties via the shared decision object.
+                TermuxConfigurationState state = TermuxConfigurationState.from(TermuxAppSharedProperties.getProperties());
 
                 String errmsg;
-                boolean state;
 
-                state = !properties.isFileShareReceiverDisabled();
-                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
-                errmsg = PackageUtils.setComponentState(context,TermuxConstants.TERMUX_PACKAGE_NAME,
+                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state.isFileShareReceiverEnabled());
+                errmsg = PackageUtils.setComponentState(context, TermuxConstants.TERMUX_PACKAGE_NAME,
                     TERMUX_APP.FILE_SHARE_RECEIVER_ACTIVITY_CLASS_NAME,
-                    state, null, false, false);
+                    state.isFileShareReceiverEnabled(), null, false, false);
                 if (errmsg != null)
                     Logger.logError(LOG_TAG, errmsg);
 
-                state = !properties.isFileViewReceiverDisabled();
-                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state);
-                errmsg = PackageUtils.setComponentState(context,TermuxConstants.TERMUX_PACKAGE_NAME,
+                Logger.logVerbose(LOG_TAG, "Setting " + TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME + " component state to " + state.isFileViewReceiverEnabled());
+                errmsg = PackageUtils.setComponentState(context, TermuxConstants.TERMUX_PACKAGE_NAME,
                     TERMUX_APP.FILE_VIEW_RECEIVER_ACTIVITY_CLASS_NAME,
-                    state, null, false, false);
+                    state.isFileViewReceiverEnabled(), null, false, false);
                 if (errmsg != null)
                     Logger.logError(LOG_TAG, errmsg);
 

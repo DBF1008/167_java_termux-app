@@ -42,6 +42,18 @@ public class TermuxTerminalExtraKeys extends TerminalExtraKeys {
         setExtraKeys();
     }
 
+    /**
+     * Reload the extra keys and style from the current {@code termux.properties} values.
+     *
+     * <p>Used by the configuration orchestration layer to refresh the keys in place on a settings
+     * reload that does not recreate the activity. The same {@link TermuxTerminalExtraKeys} instance is
+     * mutated so that the {@code ExtraKeysView} client reference set up at creation remains valid; the
+     * caller is responsible for re-applying the rebuilt {@link #getExtraKeysInfo()} to the view.
+     */
+    public void refresh() {
+        setExtraKeys();
+    }
+
 
     /**
      * Set the terminal extra keys and style.

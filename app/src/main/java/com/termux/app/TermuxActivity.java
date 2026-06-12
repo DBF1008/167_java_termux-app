@@ -23,17 +23,14 @@ import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ListView;
-import android.widget.RelativeLayout;
 import android.widget.Toast;
 
 import com.termux.R;
-import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
 import com.termux.shared.activities.ReportActivity;
 import com.termux.shared.activity.ActivityUtils;
-import com.termux.shared.activity.media.AppCompatActivityUtils;
 import com.termux.shared.data.IntentUtils;
 import com.termux.shared.android.PermissionUtils;
 import com.termux.shared.data.DataUtils;
@@ -51,9 +48,6 @@ import com.termux.shared.termux.interact.TextInputDialogUtils;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxUtils;
 import com.termux.shared.termux.settings.properties.TermuxAppSharedProperties;
-import com.termux.shared.termux.theme.TermuxThemeUtils;
-import com.termux.shared.theme.NightMode;
-import com.termux.shared.view.ViewUtils;
 import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
@@ -112,6 +106,12 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      * Termux app SharedProperties loaded from termux.properties
      */
     private TermuxAppSharedProperties mProperties;
+
+    /**
+     * The configuration orchestration layer that applies properties/preferences driven configuration
+     * (theme, margins, extra keys, components) consistently across onCreate and reloads.
+     */
+    private TermuxActivityConfigurer mConfigurer;
 
     /**
      * The root view of the {@link TermuxActivity}.
@@ -207,9 +207,12 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         // Load Termux app SharedProperties from disk
         mProperties = TermuxAppSharedProperties.getProperties();
-        reloadProperties();
 
-        setActivityTheme();
+        // Create the configuration orchestration layer and apply the initial configuration through it.
+        mConfigurer = new TermuxActivityConfigurer(this);
+        mConfigurer.reloadProperties();
+
+        mConfigurer.applyActivityTheme();
 
         super.onCreate(savedInstanceState);
 
@@ -224,7 +227,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             return;
         }
 
-        setMargins();
+        mConfigurer.setMargins();
 
         mTermuxActivityRootView = findViewById(R.id.activity_termux_root_view);
         mTermuxActivityRootView.setActivity(this);
@@ -253,7 +256,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         registerForContextMenu(mTerminalView);
 
-        FileReceiverActivity.updateFileReceiverActivityComponentsState(this);
+        mConfigurer.updateComponentsState();
 
         try {
             // Start the {@link TermuxService} and make it run regardless of who is bound to it
@@ -442,34 +445,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
 
 
-    private void reloadProperties() {
-        mProperties.loadTermuxPropertiesFromDisk();
-
-        if (mTermuxTerminalViewClient != null)
-            mTermuxTerminalViewClient.onReloadProperties();
-    }
-
-
-
-    private void setActivityTheme() {
-        // Update NightMode.APP_NIGHT_MODE
-        TermuxThemeUtils.setAppNightMode(mProperties.getNightMode());
-
-        // Set activity night mode. If NightMode.SYSTEM is set, then android will automatically
-        // trigger recreation of activity when uiMode/dark mode configuration is changed so that
-        // day or night theme takes affect.
-        AppCompatActivityUtils.setNightMode(this, NightMode.getAppNightMode().getName(), true);
-    }
-
-    private void setMargins() {
-        RelativeLayout relativeLayout = findViewById(R.id.activity_termux_root_relative_layout);
-        int marginHorizontal = mProperties.getTerminalMarginHorizontal();
-        int marginVertical = mProperties.getTerminalMarginVertical();
-        ViewUtils.setLayoutMarginsInDp(relativeLayout, marginHorizontal, marginVertical, marginHorizontal, marginVertical);
-    }
-
-
-
     public void addTermuxActivityRootViewGlobalLayoutListener() {
         getTermuxActivityRootView().getViewTreeObserver().addOnGlobalLayoutListener(getTermuxActivityRootView());
     }
@@ -517,7 +492,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         ViewGroup.LayoutParams layoutParams = terminalToolbarViewPager.getLayoutParams();
         mTerminalToolbarDefaultHeight = layoutParams.height;
 
-        setTerminalToolbarHeight();
+        mConfigurer.setTerminalToolbarHeight();
 
         String savedTextInput = null;
         if (savedInstanceState != null)
@@ -525,17 +500,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         terminalToolbarViewPager.setAdapter(new TerminalToolbarViewPager.PageAdapter(this, savedTextInput));
         terminalToolbarViewPager.addOnPageChangeListener(new TerminalToolbarViewPager.OnPageChangeListener(this, terminalToolbarViewPager));
-    }
-
-    private void setTerminalToolbarHeight() {
-        final ViewPager terminalToolbarViewPager = getTerminalToolbarViewPager();
-        if (terminalToolbarViewPager == null) return;
-
-        ViewGroup.LayoutParams layoutParams = terminalToolbarViewPager.getLayoutParams();
-        layoutParams.height = Math.round(mTerminalToolbarDefaultHeight *
-            (mTermuxTerminalExtraKeys.getExtraKeysInfo() == null ? 0 : mTermuxTerminalExtraKeys.getExtraKeysInfo().getMatrix().length) *
-            mProperties.getTerminalToolbarHeightScaleFactor());
-        terminalToolbarViewPager.setLayoutParams(layoutParams);
     }
 
     public void toggleTerminalToolbar() {
@@ -953,7 +917,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
                         return;
                     case TERMUX_ACTIVITY.ACTION_RELOAD_STYLE:
                         Logger.logDebug(LOG_TAG, "Received intent to reload styling");
-                        reloadActivityStyling(intent.getBooleanExtra(TERMUX_ACTIVITY.EXTRA_RECREATE_ACTIVITY, true));
+                        mConfigurer.reloadConfiguration(intent.getBooleanExtra(TERMUX_ACTIVITY.EXTRA_RECREATE_ACTIVITY, true));
                         return;
                     case TERMUX_ACTIVITY.ACTION_REQUEST_PERMISSIONS:
                         Logger.logDebug(LOG_TAG, "Received intent to request storage permissions");
@@ -964,41 +928,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             }
         }
     }
-
-    private void reloadActivityStyling(boolean recreateActivity) {
-        if (mProperties != null) {
-            reloadProperties();
-
-            if (mExtraKeysView != null) {
-                mExtraKeysView.setButtonTextAllCaps(mProperties.shouldExtraKeysTextBeAllCaps());
-                mExtraKeysView.reload(mTermuxTerminalExtraKeys.getExtraKeysInfo(), mTerminalToolbarDefaultHeight);
-            }
-
-            // Update NightMode.APP_NIGHT_MODE
-            TermuxThemeUtils.setAppNightMode(mProperties.getNightMode());
-        }
-
-        setMargins();
-        setTerminalToolbarHeight();
-
-        FileReceiverActivity.updateFileReceiverActivityComponentsState(this);
-
-        if (mTermuxTerminalSessionActivityClient != null)
-            mTermuxTerminalSessionActivityClient.onReloadActivityStyling();
-
-        if (mTermuxTerminalViewClient != null)
-            mTermuxTerminalViewClient.onReloadActivityStyling();
-
-        // To change the activity and drawer theme, activity needs to be recreated.
-        // It will destroy the activity, including all stored variables and views, and onCreate()
-        // will be called again. Extra keys input text, terminal sessions and transcripts will be preserved.
-        if (recreateActivity) {
-            Logger.logDebug(LOG_TAG, "Recreating activity");
-            TermuxActivity.this.recreate();
-        }
-    }
-
-
 
     public static void startTermuxActivity(@NonNull final Context context) {
         ActivityUtils.startActivity(context, newInstance(context));

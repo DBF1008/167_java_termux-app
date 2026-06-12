@@ -46,8 +46,10 @@ import com.termux.shared.termux.shell.command.environment.TermuxAppShellEnvironm
  *
  * The server is started by termux-app Application class but is not started if
  * {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER} is `false` which can be done by
- * adding the prop with value "false" to the "~/.termux/termux.properties" file. Changes
- * require termux-app to be force stopped and restarted.
+ * adding the prop with value "false" to the "~/.termux/termux.properties" file. A settings reload
+ * refreshes the running server via {@link #updateState(Context)}, but the exported
+ * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} value of already-running
+ * shells is fixed at fork time, so only shells started after the change observe the new value.
  *
  * The current state of the server can be checked with the
  * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} env variable, which is exported
@@ -77,23 +79,17 @@ public class TermuxAmSocketServer {
      */
     public static void setupTermuxAmSocketServer(@NonNull Context context) {
         // Start termux-am-socket server if enabled by user
-        boolean enabled = false;
         if (TermuxAppSharedProperties.getProperties().shouldRunTermuxAmSocketServer()) {
             Logger.logDebug(LOG_TAG, "Starting " + TITLE + " socket server since its enabled");
             start(context);
-            if (termuxAmSocketServer != null && termuxAmSocketServer.isRunning()) {
-                enabled = true;
+            if (termuxAmSocketServer != null && termuxAmSocketServer.isRunning())
                 Logger.logDebug(LOG_TAG, TITLE + " socket server successfully started");
-            }
         } else {
             Logger.logDebug(LOG_TAG, "Not starting " + TITLE + " socket server since its not enabled");
         }
 
-        // Once termux-app has started, the server state must not be changed since the variable is
-        // exported in shell sessions and tasks and if state is changed, then env of older shells will
-        // retain invalid value. User should force stop the app to update state after changing prop.
-        TERMUX_APP_AM_SOCKET_SERVER_ENABLED = enabled;
-        TermuxAppShellEnvironment.updateTermuxAppAMSocketServerEnabled(context);
+        // Export the enabled flag (computed from the actual running state) into the shell environment.
+        updateAmSocketServerEnabledEnvironment(context);
     }
 
     /**
@@ -122,8 +118,13 @@ public class TermuxAmSocketServer {
     }
     
     /**
-     * Update the state of the {@link AmSocketServer} {@link LocalServerSocket} depending on current
-     * value of {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER}.
+     * Update the running state of the {@link AmSocketServer} {@link LocalServerSocket} to match the
+     * current value of {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER}, starting or
+     * stopping it as needed, and refresh the exported enabled flag for subsequently started shells.
+     *
+     * This is invoked from the configuration orchestration layer on a settings reload. It may
+     * start()/stop() the server, which involves filesystem socket and native work, so callers should
+     * run it off the main thread. The method itself is {@code synchronized}.
      */
     public static synchronized void updateState(@NonNull Context context) {
         TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
@@ -138,6 +139,24 @@ public class TermuxAmSocketServer {
                 stop();
             }
         }
+
+        // Keep the exported enabled flag in sync with the running state so that shells started after
+        // this refresh (e.g. new terminal sessions) export the correct value. Already-running shells
+        // keep the value injected into their environment at fork time and are not affected.
+        updateAmSocketServerEnabledEnvironment(context);
+    }
+
+    /**
+     * Recompute {@link #TERMUX_APP_AM_SOCKET_SERVER_ENABLED} from the actual running state of the
+     * server and export it via {@link TermuxAppShellEnvironment#updateTermuxAppAMSocketServerEnabled(Context)}.
+     *
+     * The value is exported into the environment of every shell session and task. Already-running
+     * shells retain the value injected at fork time, so any state change after app startup only takes
+     * effect for shells started afterwards.
+     */
+    private static synchronized void updateAmSocketServerEnabledEnvironment(@NonNull Context context) {
+        TERMUX_APP_AM_SOCKET_SERVER_ENABLED = termuxAmSocketServer != null && termuxAmSocketServer.isRunning();
+        TermuxAppShellEnvironment.updateTermuxAppAMSocketServerEnabled(context);
     }
     
     /**

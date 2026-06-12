@@ -134,14 +134,14 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
     }
 
     /**
-     * Should be called when mActivity.reloadProperties() is called
+     * Should be called when the Termux properties are reloaded (TermuxActivityConfigurer.reloadProperties()).
      */
     public void onReloadProperties() {
         setSessionShortcuts();
     }
 
     /**
-     * Should be called when mActivity.reloadActivityStyling() is called
+     * Should be called when the activity configuration is reloaded (TermuxActivityConfigurer.reloadConfiguration()).
      */
     public void onReloadActivityStyling() {
         // Show the soft keyboard if required

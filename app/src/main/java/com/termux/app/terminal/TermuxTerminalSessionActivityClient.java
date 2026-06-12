@@ -35,6 +35,7 @@ import com.termux.terminal.TextStyle;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Properties;
 
 /** The {@link TerminalSessionClient} implementation that may require an {@link Activity} for its interface methods. */
@@ -491,29 +492,92 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
     }
 
 
+    /**
+     * Load font and color configuration and apply to the <em>current</em> terminal session only.
+     * <p>
+     * This preserves the original behaviour and is called from {@link #onCreate()} and
+     * {@link #onReloadActivityStyling()}. For a full reload that covers <em>all</em> active
+     * sessions, use {@link #reloadAllSessionsFontAndColors()} instead.
+     */
     public void checkForFontAndColors() {
         try {
-            File colorsFile = TermuxConstants.TERMUX_COLOR_PROPERTIES_FILE;
-            File fontFile = TermuxConstants.TERMUX_FONT_FILE;
+            loadColorSchemeAndFont();
 
-            final Properties props = new Properties();
-            if (colorsFile.isFile()) {
-                try (InputStream in = new FileInputStream(colorsFile)) {
-                    props.load(in);
-                }
-            }
-
-            TerminalColors.COLOR_SCHEME.updateWith(props);
             TerminalSession session = mActivity.getCurrentSession();
-            if (session != null && session.getEmulator() != null) {
-                session.getEmulator().mColors.reset();
-            }
+            applyColorsToSession(session);
             updateBackgroundColor();
-
-            final Typeface newTypeface = (fontFile.exists() && fontFile.length() > 0) ? Typeface.createFromFile(fontFile) : Typeface.MONOSPACE;
-            mActivity.getTerminalView().setTypeface(newTypeface);
         } catch (Exception e) {
             Logger.logStackTraceWithMessage(LOG_TAG, "Error in checkForFontAndColors()", e);
+        }
+    }
+
+    /**
+     * Reload font and colors for <strong>all</strong> active terminal sessions.
+     * <p>
+     * Unlike {@link #checkForFontAndColors()}, which only updates the current session, this method
+     * ensures that background sessions also pick up the latest color scheme from
+     * {@code colors.properties} and that the font is re-applied to the terminal view.
+     * <p>
+     * Must be called on the main (UI) thread.
+     */
+    public void reloadAllSessionsFontAndColors() {
+        try {
+            loadColorSchemeAndFont();
+
+            TermuxService service = mActivity.getTermuxService();
+            if (service != null) {
+                List<TermuxSession> sessions = service.getTermuxSessions();
+                Logger.logInfo(LOG_TAG, "Reloading font/colors for " + sessions.size() + " sessions");
+                for (int i = 0; i < sessions.size(); i++) {
+                    TermuxSession termuxSession = sessions.get(i);
+                    if (termuxSession != null) {
+                        TerminalSession terminalSession = termuxSession.getTerminalSession();
+                        applyColorsToSession(terminalSession);
+                    }
+                }
+            } else {
+                // Service not connected – fall back to current session only.
+                applyColorsToSession(mActivity.getCurrentSession());
+            }
+
+            updateBackgroundColor();
+        } catch (Exception e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Error in reloadAllSessionsFontAndColors()", e);
+        }
+    }
+
+    /**
+     * Load the color scheme from {@code colors.properties} into the global
+     * {@link TerminalColors#COLOR_SCHEME} and apply the font from {@code font.ttf} to the terminal
+     * view. These are global (shared) operations that only need to happen once per reload cycle.
+     */
+    private void loadColorSchemeAndFont() {
+        File colorsFile = TermuxConstants.TERMUX_COLOR_PROPERTIES_FILE;
+        File fontFile = TermuxConstants.TERMUX_FONT_FILE;
+
+        final Properties props = new Properties();
+        if (colorsFile.isFile()) {
+            try (InputStream in = new FileInputStream(colorsFile)) {
+                props.load(in);
+            }
+        }
+
+        TerminalColors.COLOR_SCHEME.updateWith(props);
+
+        final Typeface newTypeface = (fontFile.exists() && fontFile.length() > 0)
+            ? Typeface.createFromFile(fontFile) : Typeface.MONOSPACE;
+        mActivity.getTerminalView().setTypeface(newTypeface);
+    }
+
+    /**
+     * Reset the color palette of a single {@link TerminalSession} so that it picks up the current
+     * global {@link TerminalColors#COLOR_SCHEME}.
+     *
+     * @param session the session to update; may be {@code null} (no-op in that case)
+     */
+    private void applyColorsToSession(@Nullable TerminalSession session) {
+        if (session != null && session.getEmulator() != null) {
+            session.getEmulator().mColors.reset();
         }
     }
 

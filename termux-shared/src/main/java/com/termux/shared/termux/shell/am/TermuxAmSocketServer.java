@@ -122,8 +122,22 @@ public class TermuxAmSocketServer {
     }
     
     /**
+     * Check if the AM socket server is currently running.
+     *
+     * @return {@code true} if the server socket is bound and accepting connections.
+     */
+    public static synchronized boolean isServerRunning() {
+        return termuxAmSocketServer != null && termuxAmSocketServer.isRunning();
+    }
+
+    /**
      * Update the state of the {@link AmSocketServer} {@link LocalServerSocket} depending on current
      * value of {@link TermuxPropertyConstants#KEY_RUN_TERMUX_AM_SOCKET_SERVER}.
+     *
+     * After updating, the {@link #TERMUX_APP_AM_SOCKET_SERVER_ENABLED} flag and the
+     * {@link TermuxAppShellEnvironment#ENV_TERMUX_APP__AM_SOCKET_SERVER_ENABLED} environment
+     * variable value are synchronised so that newly created shell sessions see the latest state.
+     * Existing sessions retain their original environment snapshot (an inherent Unix limitation).
      */
     public static synchronized void updateState(@NonNull Context context) {
         TermuxAppSharedProperties properties = TermuxAppSharedProperties.getProperties();
@@ -138,6 +152,11 @@ public class TermuxAmSocketServer {
                 stop();
             }
         }
+
+        // Synchronise the static flag and shell environment so that new sessions get the
+        // up-to-date value. Existing sessions will still hold the old env snapshot.
+        TERMUX_APP_AM_SOCKET_SERVER_ENABLED = isServerRunning();
+        TermuxAppShellEnvironment.updateTermuxAppAMSocketServerEnabled(context);
     }
     
     /**

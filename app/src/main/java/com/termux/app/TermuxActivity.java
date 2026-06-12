@@ -51,6 +51,7 @@ import com.termux.shared.termux.interact.TextInputDialogUtils;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.termux.TermuxUtils;
 import com.termux.shared.termux.settings.properties.TermuxAppSharedProperties;
+import com.termux.shared.termux.settings.reload.TermuxSettingsReloader;
 import com.termux.shared.termux.theme.TermuxThemeUtils;
 import com.termux.shared.theme.NightMode;
 import com.termux.shared.view.ViewUtils;
@@ -966,36 +967,59 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     private void reloadActivityStyling(boolean recreateActivity) {
-        if (mProperties != null) {
-            reloadProperties();
+        TermuxSettingsReloader.ReloadCallback callback = new TermuxSettingsReloader.ReloadCallback() {
+            @Override
+            public void onPropertiesReloaded() {
+                if (mProperties != null) {
+                    if (mExtraKeysView != null) {
+                        mExtraKeysView.setButtonTextAllCaps(mProperties.shouldExtraKeysTextBeAllCaps());
+                        mExtraKeysView.reload(mTermuxTerminalExtraKeys.getExtraKeysInfo(), mTerminalToolbarDefaultHeight);
+                    }
 
-            if (mExtraKeysView != null) {
-                mExtraKeysView.setButtonTextAllCaps(mProperties.shouldExtraKeysTextBeAllCaps());
-                mExtraKeysView.reload(mTermuxTerminalExtraKeys.getExtraKeysInfo(), mTerminalToolbarDefaultHeight);
+                    // Update NightMode.APP_NIGHT_MODE
+                    TermuxThemeUtils.setAppNightMode(mProperties.getNightMode());
+                }
+
+                setMargins();
+                setTerminalToolbarHeight();
+
+                FileReceiverActivity.updateFileReceiverActivityComponentsState(TermuxActivity.this);
+
+                if (mTermuxTerminalViewClient != null) {
+                    mTermuxTerminalViewClient.onReloadProperties();
+                    mTermuxTerminalViewClient.onReloadActivityStyling();
+                }
             }
 
-            // Update NightMode.APP_NIGHT_MODE
-            TermuxThemeUtils.setAppNightMode(mProperties.getNightMode());
-        }
+            @Override
+            public void onReloadComplete(@NonNull TermuxSettingsReloader.ReloadResult result) {
+                if (!result.success) {
+                    Logger.logError(LOG_TAG, "Settings reload failed: " + result.errorMessage);
+                    return;
+                }
 
-        setMargins();
-        setTerminalToolbarHeight();
+                // Apply font/colors to ALL sessions (not just the current one).
+                if (mTermuxTerminalSessionActivityClient != null)
+                    mTermuxTerminalSessionActivityClient.reloadAllSessionsFontAndColors();
 
-        FileReceiverActivity.updateFileReceiverActivityComponentsState(this);
+                if (result.amSocketServerEnvStale) {
+                    Logger.logWarn(LOG_TAG,
+                        "AM Socket Server env variable is stale in existing sessions. "
+                        + "Only newly created sessions will have the updated value.");
+                }
 
-        if (mTermuxTerminalSessionActivityClient != null)
-            mTermuxTerminalSessionActivityClient.onReloadActivityStyling();
+                // To change the activity and drawer theme, activity needs to be recreated.
+                // It will destroy the activity, including all stored variables and views, and
+                // onCreate() will be called again. Extra keys input text, terminal sessions and
+                // transcripts will be preserved.
+                if (recreateActivity) {
+                    Logger.logDebug(LOG_TAG, "Recreating activity");
+                    TermuxActivity.this.recreate();
+                }
+            }
+        };
 
-        if (mTermuxTerminalViewClient != null)
-            mTermuxTerminalViewClient.onReloadActivityStyling();
-
-        // To change the activity and drawer theme, activity needs to be recreated.
-        // It will destroy the activity, including all stored variables and views, and onCreate()
-        // will be called again. Extra keys input text, terminal sessions and transcripts will be preserved.
-        if (recreateActivity) {
-            Logger.logDebug(LOG_TAG, "Recreating activity");
-            TermuxActivity.this.recreate();
-        }
+        TermuxSettingsReloader.reload(this, callback);
     }
 
 

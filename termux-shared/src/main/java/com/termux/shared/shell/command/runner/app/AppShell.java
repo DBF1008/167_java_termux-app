@@ -16,8 +16,8 @@ import com.termux.shared.shell.command.environment.ShellEnvironmentUtils;
 import com.termux.shared.shell.command.result.ResultData;
 import com.termux.shared.errors.Errno;
 import com.termux.shared.logger.Logger;
-import com.termux.shared.shell.command.ExecutionCommand.ExecutionState;
 import com.termux.shared.shell.command.environment.IShellEnvironment;
+import com.termux.shared.shell.command.runner.ShellCommandRunnerUtils;
 import com.termux.shared.shell.ShellUtils;
 import com.termux.shared.shell.StreamGobbler;
 
@@ -25,9 +25,7 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 
 /**
  * A class that maintains info for background app shells run with {@link Runtime#exec(String[], String[], File)}.
@@ -83,7 +81,7 @@ public final class AppShell {
         if (executionCommand.executable == null || executionCommand.executable.isEmpty()) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(),
                 currentPackageContext.getString(R.string.error_executable_unset, executionCommand.getCommandIdAndLabelLogString()));
-            AppShell.processAppShellResult(null, executionCommand);
+            ShellCommandRunnerUtils.processResult(executionCommand, LOG_TAG, null);
             return null;
         }
 
@@ -105,19 +103,12 @@ public final class AppShell {
         final String[] commandArray = shellEnvironmentClient.setupShellCommandArguments(executionCommand.executable, executionCommand.arguments);
 
         // Setup command environment
-        HashMap<String, String> environment = shellEnvironmentClient.setupShellCommandEnvironment(currentPackageContext,
-            executionCommand);
-        if (additionalEnvironment != null)
-            environment.putAll(additionalEnvironment);
-        List<String> environmentList = ShellEnvironmentUtils.convertEnvironmentToEnviron(environment);
-        Collections.sort(environmentList);
-        String[] environmentArray = environmentList.toArray(new String[0]);
+        String[] environmentArray = ShellEnvironmentUtils.setupShellCommandEnvironmentArray(currentPackageContext,
+            executionCommand, shellEnvironmentClient, additionalEnvironment);
 
-        if (!executionCommand.setState(ExecutionState.EXECUTING)) {
-            executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), currentPackageContext.getString(R.string.error_failed_to_execute_app_shell_command, executionCommand.getCommandIdAndLabelLogString()));
-            AppShell.processAppShellResult(null, executionCommand);
+        if (!ShellCommandRunnerUtils.enterExecutingOrProcessFailure(currentPackageContext, executionCommand, LOG_TAG,
+                R.string.error_failed_to_execute_app_shell_command))
             return null;
-        }
 
         // No need to log stdin if logging is disabled, like for app internal scripts
         Logger.logDebugExtended(LOG_TAG, ExecutionCommand.getExecutionInputLogString(executionCommand,
@@ -131,7 +122,7 @@ public final class AppShell {
             process = Runtime.getRuntime().exec(commandArray, environmentArray, new File(executionCommand.workingDirectory));
         } catch (IOException e) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), currentPackageContext.getString(R.string.error_failed_to_execute_app_shell_command, executionCommand.getCommandIdAndLabelLogString()), e);
-            AppShell.processAppShellResult(null, executionCommand);
+            ShellCommandRunnerUtils.processResult(executionCommand, LOG_TAG, null);
             return null;
         }
 
@@ -163,7 +154,7 @@ public final class AppShell {
      *
      * If the processes finishes, then sets {@link ResultData#stdout}, {@link ResultData#stderr}
      * and {@link ResultData#exitCode} for the {@link #mExecutionCommand} of the {@code appShell}
-     * and then calls {@link #processAppShellResult(AppShell, ExecutionCommand) to process the result}.
+     * and then processes the result via {@link ShellCommandRunnerUtils#processResult(ExecutionCommand, String, Runnable)}.
      *
      * @param context The {@link Context} for operations.
      */
@@ -201,7 +192,8 @@ public final class AppShell {
                     // returning null
                     mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_exception_received_while_executing_app_shell_command, mExecutionCommand.getCommandIdAndLabelLogString(), e.getMessage()), e);
                     mExecutionCommand.resultData.exitCode = 1;
-                    AppShell.processAppShellResult(this, null);
+                    ShellCommandRunnerUtils.processResult(mExecutionCommand, LOG_TAG,
+                        mAppShellClient != null ? () -> mAppShellClient.onAppShellExited(this) : null);
                     kill();
                     return;
                 }
@@ -232,17 +224,11 @@ public final class AppShell {
             Logger.logDebug(LOG_TAG, "The \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell with pid " + mExecutionCommand.mPid + " exited with code: " + exitCode);
 
         // If the execution command has already failed, like SIGKILL was sent, then don't continue
-        if (mExecutionCommand.isStateFailed()) {
-            Logger.logDebug(LOG_TAG, "Ignoring setting \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell state to ExecutionState.EXECUTED and processing results since it has already failed");
-            return;
-        }
-
-        mExecutionCommand.resultData.exitCode = exitCode;
-
-        if (!mExecutionCommand.setState(ExecutionState.EXECUTED))
+        if (!ShellCommandRunnerUtils.markExecutedIfNotFailed(mExecutionCommand, LOG_TAG, exitCode, null))
             return;
 
-        AppShell.processAppShellResult(this, null);
+        ShellCommandRunnerUtils.processResult(mExecutionCommand, LOG_TAG,
+            mAppShellClient != null ? () -> mAppShellClient.onAppShellExited(this) : null);
     }
 
     /**
@@ -250,8 +236,8 @@ public final class AppShell {
      * if its still executing.
      *
      * @param context The {@link Context} for operations.
-     * @param processResult If set to {@code true}, then the {@link #processAppShellResult(AppShell, ExecutionCommand)}
-     *                      will be called to process the failure.
+     * @param processResult If set to {@code true}, then the result will be processed via
+     *                      {@link ShellCommandRunnerUtils} to process the failure.
      */
     public void killIfExecuting(@NonNull final Context context, boolean processResult) {
         // If execution command has already finished executing, then no need to process results or send SIGKILL
@@ -262,12 +248,8 @@ public final class AppShell {
 
         Logger.logDebug(LOG_TAG, "Send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell");
 
-        if (mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_sending_sigkill_to_process))) {
-            if (processResult) {
-                mExecutionCommand.resultData.exitCode = 137; // SIGKILL
-                AppShell.processAppShellResult(this, null);
-            }
-        }
+        ShellCommandRunnerUtils.failKilledAndProcess(context, mExecutionCommand, LOG_TAG, processResult,
+            null, mAppShellClient != null ? () -> mAppShellClient.onAppShellExited(this) : null);
 
         if (mExecutionCommand.isExecuting()) {
             kill();
@@ -284,44 +266,6 @@ public final class AppShell {
             Os.kill(pid, OsConstants.SIGKILL);
         } catch (ErrnoException e) {
             Logger.logWarn(LOG_TAG, "Failed to send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell with pid " + pid + ": " + e.getMessage());
-        }
-    }
-
-    /**
-     * Process the results of {@link AppShell} or {@link ExecutionCommand}.
-     *
-     * Only one of {@code appShell} and {@code executionCommand} must be set.
-     *
-     * If the {@code appShell} and its {@link #mAppShellClient} are not {@code null},
-     * then the {@link AppShellClient#onAppShellExited(AppShell)} callback will be called.
-     *
-     * @param appShell The {@link AppShell}, which should be set if
-     *                  {@link #execute(Context, ExecutionCommand, AppShellClient, IShellEnvironment, HashMap, boolean)}
-     *                   successfully started the process.
-     * @param executionCommand The {@link ExecutionCommand}, which should be set if
-     *                          {@link #execute(Context, ExecutionCommand, AppShellClient, IShellEnvironment, HashMap, boolean)}
-     *                          failed to start the process.
-     */
-    private static void processAppShellResult(final AppShell appShell, ExecutionCommand executionCommand) {
-        if (appShell != null)
-            executionCommand = appShell.mExecutionCommand;
-
-        if (executionCommand == null) return;
-
-        if (executionCommand.shouldNotProcessResults()) {
-            Logger.logDebug(LOG_TAG, "Ignoring duplicate call to process \"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell result");
-            return;
-        }
-
-        Logger.logDebug(LOG_TAG, "Processing \"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell result");
-
-        if (appShell != null && appShell.mAppShellClient != null) {
-            appShell.mAppShellClient.onAppShellExited(appShell);
-        } else {
-            // If a callback is not set and execution command didn't fail, then we set success state now
-            // Otherwise, the callback host can set it himself when its done with the appShell
-            if (!executionCommand.isStateFailed())
-                executionCommand.setState(ExecutionCommand.ExecutionState.SUCCESS);
         }
     }
 

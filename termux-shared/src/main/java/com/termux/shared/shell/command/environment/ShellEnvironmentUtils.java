@@ -2,12 +2,15 @@ package com.termux.shared.shell.command.environment;
 
 import static com.termux.shared.shell.command.environment.UnixShellEnvironment.*;
 
+import android.content.Context;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.termux.shared.errors.Error;
 import com.termux.shared.file.FileUtils;
 import com.termux.shared.logger.Logger;
+import com.termux.shared.shell.command.ExecutionCommand;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,6 +43,37 @@ public class ShellEnvironmentUtils {
                 environmentList.add(name + "=" + environmentMap.get(name));
         }
         return environmentList;
+    }
+
+    /**
+     * Build the sorted `environ` {@link String[]} for an {@link ExecutionCommand} that is passed to
+     * the process when it is created.
+     *
+     * This is the shared implementation of the environment setup that all execution-command runners
+     * (foreground {@code TermuxSession}, background {@code AppShell}, etc.) require: it gets the base
+     * environment from the {@code shellEnvironmentClient}, overrides it with any
+     * {@code additionalEnvironment}, converts it to the {@code name=value} `environ` format with
+     * {@link #convertEnvironmentToEnviron(HashMap)}, sorts it and returns it as an array.
+     *
+     * @param currentPackageContext The {@link Context} for the current package.
+     * @param executionCommand The {@link ExecutionCommand} for which to set up the environment.
+     * @param shellEnvironmentClient The {@link IShellEnvironment} implementation to get the base environment.
+     * @param additionalEnvironment The additional shell environment variables to export. Existing
+     *                              variables will be overridden. May be {@code null}.
+     * @return Returns the sorted `environ` {@link String[]}.
+     */
+    @NonNull
+    public static String[] setupShellCommandEnvironmentArray(@NonNull Context currentPackageContext,
+                                                             @NonNull ExecutionCommand executionCommand,
+                                                             @NonNull IShellEnvironment shellEnvironmentClient,
+                                                             @Nullable HashMap<String, String> additionalEnvironment) {
+        HashMap<String, String> environment = shellEnvironmentClient.setupShellCommandEnvironment(currentPackageContext,
+            executionCommand);
+        if (additionalEnvironment != null)
+            environment.putAll(additionalEnvironment);
+        List<String> environmentList = convertEnvironmentToEnviron(environment);
+        Collections.sort(environmentList);
+        return environmentList.toArray(new String[0]);
     }
 
     /**

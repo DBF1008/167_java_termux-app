@@ -180,6 +180,12 @@ public final class TermuxPreferenceConstants {
         public static final String KEY_CRASH_REPORT_NOTIFICATIONS_ENABLED = "crash_report_notifications_enabled";
         public static final boolean DEFAULT_VALUE_CRASH_REPORT_NOTIFICATIONS_ENABLED = true;
 
+        /**
+         * Defines the key for session order and pin state.
+         * Stored as a JSON array of objects with handle, pinned, and position fields.
+         */
+        public static final String KEY_SESSION_ORDER_STATE = "session_order_state";
+
     }
 
 

@@ -258,4 +258,14 @@ public class TermuxAppSharedPreferences extends AppSharedPreferences {
         SharedPreferenceUtils.setBoolean(mSharedPreferences, TERMUX_APP.KEY_CRASH_REPORT_NOTIFICATIONS_ENABLED, value, false);
     }
 
+
+
+    public String getSessionOrderState() {
+        return SharedPreferenceUtils.getString(mSharedPreferences, TERMUX_APP.KEY_SESSION_ORDER_STATE, null, true);
+    }
+
+    public void setSessionOrderState(String value) {
+        SharedPreferenceUtils.setString(mSharedPreferences, TERMUX_APP.KEY_SESSION_ORDER_STATE, value, false);
+    }
+
 }

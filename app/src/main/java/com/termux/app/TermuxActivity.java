@@ -43,6 +43,7 @@ import com.termux.app.activities.HelpActivity;
 import com.termux.app.activities.SettingsActivity;
 import com.termux.shared.termux.crash.TermuxCrashUtils;
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences;
+import com.termux.shared.termux.shell.SessionOrderManager;
 import com.termux.app.terminal.TermuxSessionsListViewController;
 import com.termux.app.terminal.io.TerminalToolbarViewPager;
 import com.termux.app.terminal.TermuxTerminalViewClient;
@@ -107,6 +108,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
      * Termux app shared preferences manager.
      */
     private TermuxAppSharedPreferences mPreferences;
+
+    /**
+     * Session order manager for pin and reorder functionality.
+     */
+    private SessionOrderManager mSessionOrderManager;
 
     /**
      * Termux app SharedProperties loaded from termux.properties
@@ -223,6 +229,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             mIsInvalidState = true;
             return;
         }
+
+        mSessionOrderManager = new SessionOrderManager(mPreferences.getSharedPreferences());
 
         setMargins();
 
@@ -483,7 +491,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     private void setTermuxTerminalViewAndClients() {
         // Set termux terminal view and session clients
-        mTermuxTerminalSessionActivityClient = new TermuxTerminalSessionActivityClient(this);
+        mTermuxTerminalSessionActivityClient = new TermuxTerminalSessionActivityClient(this, mSessionOrderManager);
         mTermuxTerminalViewClient = new TermuxTerminalViewClient(this, mTermuxTerminalSessionActivityClient);
 
         // Set termux terminal view
@@ -499,7 +507,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     private void setTermuxSessionsListView() {
         ListView termuxSessionsListView = findViewById(R.id.terminal_sessions_list);
-        mTermuxSessionListViewController = new TermuxSessionsListViewController(this, mTermuxService.getTermuxSessions());
+        mTermuxSessionListViewController = new TermuxSessionsListViewController(this, mTermuxService.getTermuxSessions(), mSessionOrderManager);
         termuxSessionsListView.setAdapter(mTermuxSessionListViewController);
         termuxSessionsListView.setOnItemClickListener(mTermuxSessionListViewController);
         termuxSessionsListView.setOnItemLongClickListener(mTermuxSessionListViewController);
@@ -856,7 +864,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
 
     public void termuxSessionListNotifyUpdated() {
-        mTermuxSessionListViewController.notifyDataSetChanged();
+        if (mTermuxSessionListViewController != null) {
+            mTermuxSessionListViewController.refreshDisplayList();
+        }
     }
 
     public boolean isVisible() {
@@ -903,6 +913,14 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     public TermuxAppSharedProperties getProperties() {
         return mProperties;
+    }
+
+    public SessionOrderManager getSessionOrderManager() {
+        return mSessionOrderManager;
+    }
+
+    public TermuxSessionsListViewController getTermuxSessionListViewController() {
+        return mTermuxSessionListViewController;
     }
 
 

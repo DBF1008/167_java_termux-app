@@ -265,6 +265,8 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
                 mTermuxTerminalSessionActivityClient.renameSession(currentSession);
             } else if (unicodeChar == 'c'/* create */) {
                 mTermuxTerminalSessionActivityClient.addNewSession(false, null);
+            } else if (unicodeChar == 'e'/* pin/unpin */) {
+                mTermuxTerminalSessionActivityClient.togglePinCurrentSession();
             } else if (unicodeChar == 'u' /* urls */) {
                 showUrlSelection();
             } else if (unicodeChar == 'v') {

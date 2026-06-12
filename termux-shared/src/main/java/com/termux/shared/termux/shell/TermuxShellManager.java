@@ -7,6 +7,7 @@ import android.widget.ArrayAdapter;
 import androidx.annotation.NonNull;
 
 import com.termux.shared.shell.command.ExecutionCommand;
+import com.termux.shared.shell.command.runner.ExecutionCommandRunner;
 import com.termux.shared.shell.command.runner.app.AppShell;
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
@@ -118,6 +119,45 @@ public class TermuxShellManager {
         TERMINAL_SESSION_NUMBER_SINCE_APP_START = curValue + 1;
         if (TERMINAL_SESSION_NUMBER_SINCE_APP_START < 0) TERMINAL_SESSION_NUMBER_SINCE_APP_START = Integer.MAX_VALUE;
         return curValue;
+    }
+
+
+
+    /**
+     * Register a newly created runner in the appropriate typed list and remove its
+     * {@link ExecutionCommand} from the pending plugin execution commands list.
+     *
+     * @param runner The {@link ExecutionCommandRunner} that was just created.
+     */
+    public synchronized void registerRunner(ExecutionCommandRunner runner) {
+        if (runner == null) return;
+        ExecutionCommand executionCommand = runner.getExecutionCommand();
+
+        if (runner instanceof TermuxSession) {
+            mTermuxSessions.add((TermuxSession) runner);
+        } else if (runner instanceof AppShell) {
+            mTermuxTasks.add((AppShell) runner);
+        }
+
+        // Remove the execution command from the pending plugin execution commands list since it has
+        // now been processed
+        if (executionCommand.isPluginExecutionCommand)
+            mPendingPluginExecutionCommands.remove(executionCommand);
+    }
+
+    /**
+     * Unregister a runner from the appropriate typed list.
+     *
+     * @param runner The {@link ExecutionCommandRunner} that exited.
+     */
+    public synchronized void unregisterRunner(ExecutionCommandRunner runner) {
+        if (runner == null) return;
+
+        if (runner instanceof TermuxSession) {
+            mTermuxSessions.remove(runner);
+        } else if (runner instanceof AppShell) {
+            mTermuxTasks.remove(runner);
+        }
     }
 
 }

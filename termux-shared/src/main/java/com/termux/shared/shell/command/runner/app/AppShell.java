@@ -18,6 +18,9 @@ import com.termux.shared.errors.Errno;
 import com.termux.shared.logger.Logger;
 import com.termux.shared.shell.command.ExecutionCommand.ExecutionState;
 import com.termux.shared.shell.command.environment.IShellEnvironment;
+import com.termux.shared.shell.command.runner.ExecutionCommandRunner;
+import com.termux.shared.shell.command.runner.ExecutionCommandRunnerClient;
+import com.termux.shared.shell.command.runner.ExecutionCommandResultHandler;
 import com.termux.shared.shell.ShellUtils;
 import com.termux.shared.shell.StreamGobbler;
 
@@ -34,19 +37,19 @@ import java.util.List;
  * It also provides a way to link each {@link Process} with the {@link ExecutionCommand}
  * that started it. The shell is run in the app user context.
  */
-public final class AppShell {
+public final class AppShell implements ExecutionCommandRunner {
 
     private final Process mProcess;
     private final ExecutionCommand mExecutionCommand;
-    private final AppShellClient mAppShellClient;
+    private final ExecutionCommandRunnerClient mRunnerClient;
 
     private static final String LOG_TAG = "AppShell";
 
     private AppShell(@NonNull final Process process, @NonNull final ExecutionCommand executionCommand,
-                     final AppShellClient appShellClient) {
+                     final ExecutionCommandRunnerClient runnerClient) {
         this.mProcess = process;
         this.mExecutionCommand = executionCommand;
-        this.mAppShellClient = appShellClient;
+        this.mRunnerClient = runnerClient;
     }
 
     /**
@@ -60,8 +63,8 @@ public final class AppShell {
      *                              the current package and not the context of a `sharedUserId` package,
      *                              since environment setup may be dependent on current package.
      * @param executionCommand The {@link ExecutionCommand} containing the information for execution command.
-     * @param appShellClient The {@link AppShellClient} interface implementation.
-     *                           The {@link AppShellClient#onAppShellExited(AppShell)} will
+     * @param runnerClient The {@link ExecutionCommandRunnerClient} interface implementation.
+     *                           The {@link ExecutionCommandRunnerClient#onRunnerExited(ExecutionCommandRunner)} will
      *                           be called regardless of {@code isSynchronous} value but not if
      *                           {@code null} is returned by this method. This can
      *                           optionally be {@code null}.
@@ -76,14 +79,14 @@ public final class AppShell {
      * @return Returns the {@link AppShell}. This will be {@code null} if failed to start the execution command.
      */
     public static AppShell execute(@NonNull final Context currentPackageContext, @NonNull ExecutionCommand executionCommand,
-                                   final AppShellClient appShellClient,
+                                   final ExecutionCommandRunnerClient runnerClient,
                                    @NonNull final IShellEnvironment shellEnvironmentClient,
                                    @Nullable HashMap<String, String> additionalEnvironment,
                                    final boolean isSynchronous) {
         if (executionCommand.executable == null || executionCommand.executable.isEmpty()) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(),
                 currentPackageContext.getString(R.string.error_executable_unset, executionCommand.getCommandIdAndLabelLogString()));
-            AppShell.processAppShellResult(null, executionCommand);
+            ExecutionCommandResultHandler.processResult(null, executionCommand, LOG_TAG, runnerClient);
             return null;
         }
 
@@ -115,7 +118,7 @@ public final class AppShell {
 
         if (!executionCommand.setState(ExecutionState.EXECUTING)) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), currentPackageContext.getString(R.string.error_failed_to_execute_app_shell_command, executionCommand.getCommandIdAndLabelLogString()));
-            AppShell.processAppShellResult(null, executionCommand);
+            ExecutionCommandResultHandler.processResult(null, executionCommand, LOG_TAG, runnerClient);
             return null;
         }
 
@@ -131,11 +134,11 @@ public final class AppShell {
             process = Runtime.getRuntime().exec(commandArray, environmentArray, new File(executionCommand.workingDirectory));
         } catch (IOException e) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), currentPackageContext.getString(R.string.error_failed_to_execute_app_shell_command, executionCommand.getCommandIdAndLabelLogString()), e);
-            AppShell.processAppShellResult(null, executionCommand);
+            ExecutionCommandResultHandler.processResult(null, executionCommand, LOG_TAG, runnerClient);
             return null;
         }
 
-        final AppShell appShell = new AppShell(process, executionCommand, appShellClient);
+        final AppShell appShell = new AppShell(process, executionCommand, runnerClient);
         if (isSynchronous) {
             try {
                 appShell.executeInner(currentPackageContext);
@@ -163,7 +166,7 @@ public final class AppShell {
      *
      * If the processes finishes, then sets {@link ResultData#stdout}, {@link ResultData#stderr}
      * and {@link ResultData#exitCode} for the {@link #mExecutionCommand} of the {@code appShell}
-     * and then calls {@link #processAppShellResult(AppShell, ExecutionCommand) to process the result}.
+     * and then calls {@link ExecutionCommandResultHandler#processResult} to process the result.
      *
      * @param context The {@link Context} for operations.
      */
@@ -201,7 +204,7 @@ public final class AppShell {
                     // returning null
                     mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_exception_received_while_executing_app_shell_command, mExecutionCommand.getCommandIdAndLabelLogString(), e.getMessage()), e);
                     mExecutionCommand.resultData.exitCode = 1;
-                    AppShell.processAppShellResult(this, null);
+                    ExecutionCommandResultHandler.processResult(this, null, LOG_TAG, mRunnerClient);
                     kill();
                     return;
                 }
@@ -242,40 +245,31 @@ public final class AppShell {
         if (!mExecutionCommand.setState(ExecutionState.EXECUTED))
             return;
 
-        AppShell.processAppShellResult(this, null);
+        ExecutionCommandResultHandler.processResult(this, null, LOG_TAG, mRunnerClient);
     }
 
     /**
-     * Kill this {@link AppShell} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}
+     * Kill this {@link AppShell} by sending a SIGKILL to its {@link #mProcess}
      * if its still executing.
      *
      * @param context The {@link Context} for operations.
-     * @param processResult If set to {@code true}, then the {@link #processAppShellResult(AppShell, ExecutionCommand)}
-     *                      will be called to process the failure.
+     * @param processResult If set to {@code true}, then the result will be processed.
      */
+    @Override
     public void killIfExecuting(@NonNull final Context context, boolean processResult) {
-        // If execution command has already finished executing, then no need to process results or send SIGKILL
-        if (mExecutionCommand.hasExecuted()) {
-            Logger.logDebug(LOG_TAG, "Ignoring sending SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell since it has already finished executing");
-            return;
-        }
-
-        Logger.logDebug(LOG_TAG, "Send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" AppShell");
-
-        if (mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_sending_sigkill_to_process))) {
-            if (processResult) {
-                mExecutionCommand.resultData.exitCode = 137; // SIGKILL
-                AppShell.processAppShellResult(this, null);
-            }
-        }
-
-        if (mExecutionCommand.isExecuting()) {
-            kill();
-        }
+        ExecutionCommandResultHandler.performKillIfExecuting(
+            mExecutionCommand, context, LOG_TAG, "AppShell", processResult,
+            null, // no output collection needed for AppShell
+            () -> ExecutionCommandResultHandler.processResult(this, null, LOG_TAG, mRunnerClient),
+            () -> {
+                if (mExecutionCommand.isExecuting()) {
+                    kill();
+                }
+            });
     }
 
     /**
-     * Kill this {@link AppShell} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}.
+     * Kill this {@link AppShell} by sending a SIGKILL to its {@link #mProcess}.
      */
     public void kill() {
         int pid = ShellUtils.getPid(mProcess);
@@ -287,63 +281,14 @@ public final class AppShell {
         }
     }
 
-    /**
-     * Process the results of {@link AppShell} or {@link ExecutionCommand}.
-     *
-     * Only one of {@code appShell} and {@code executionCommand} must be set.
-     *
-     * If the {@code appShell} and its {@link #mAppShellClient} are not {@code null},
-     * then the {@link AppShellClient#onAppShellExited(AppShell)} callback will be called.
-     *
-     * @param appShell The {@link AppShell}, which should be set if
-     *                  {@link #execute(Context, ExecutionCommand, AppShellClient, IShellEnvironment, HashMap, boolean)}
-     *                   successfully started the process.
-     * @param executionCommand The {@link ExecutionCommand}, which should be set if
-     *                          {@link #execute(Context, ExecutionCommand, AppShellClient, IShellEnvironment, HashMap, boolean)}
-     *                          failed to start the process.
-     */
-    private static void processAppShellResult(final AppShell appShell, ExecutionCommand executionCommand) {
-        if (appShell != null)
-            executionCommand = appShell.mExecutionCommand;
-
-        if (executionCommand == null) return;
-
-        if (executionCommand.shouldNotProcessResults()) {
-            Logger.logDebug(LOG_TAG, "Ignoring duplicate call to process \"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell result");
-            return;
-        }
-
-        Logger.logDebug(LOG_TAG, "Processing \"" + executionCommand.getCommandIdAndLabelLogString() + "\" AppShell result");
-
-        if (appShell != null && appShell.mAppShellClient != null) {
-            appShell.mAppShellClient.onAppShellExited(appShell);
-        } else {
-            // If a callback is not set and execution command didn't fail, then we set success state now
-            // Otherwise, the callback host can set it himself when its done with the appShell
-            if (!executionCommand.isStateFailed())
-                executionCommand.setState(ExecutionCommand.ExecutionState.SUCCESS);
-        }
-    }
-
-    public Process getProcess() {
-        return mProcess;
-    }
-
+    @NonNull
+    @Override
     public ExecutionCommand getExecutionCommand() {
         return mExecutionCommand;
     }
 
-
-
-    public interface AppShellClient {
-
-        /**
-         * Callback function for when {@link AppShell} exits.
-         *
-         * @param appShell The {@link AppShell} that exited.
-         */
-        void onAppShellExited(AppShell appShell);
-
+    public Process getProcess() {
+        return mProcess;
     }
 
 }
